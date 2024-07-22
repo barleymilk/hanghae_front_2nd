@@ -2,38 +2,209 @@ name: CI Assignment 6
 
 on:
   pull_request:
-    types:
-      - opened
+    types: [opened, synchronize]
     paths:
       - 'packages/assignment-6/**'
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # 최신 Ubuntu 환경에서 실행
     steps:
-      - name: job1 구현
-        run: echo "job1의 내용을 구현해주세요"
+      - uses: actions/checkout@v2  # 리포지토리의 코드를 체크아웃
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '14'  # Node.js 버전 14를 설정
+
+      - name: Install dependencies
+        run: npm install  # 프로젝트의 의존성을 설치
+
+      - name: Run tsc and build
+        run: |
+          npm run build  # 빌드 명령어 실행
+        continue-on-error: true  # 오류가 발생해도 다음 단계로 넘어감
+
+      - name: Comment on build errors
+        if: failure()  # 이전 단계가 실패했을 때만 실행
+        run: |
+          # 빌드 명령어의 결과를 변수에 저장
+          COMMENT="## :x: Build failed\n\`\`\`\n$(npm run build 2>&1)\n\`\`\`"
+          echo "$COMMENT" > build-comment.txt  # 결과를 build-comment.txt 파일에 저장
+          cat build-comment.txt  # 파일 내용을 출력
+          # GitHub API를 사용하여 PR에 코멘트를 남김
+          curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            -X POST \
+            -d "{\"body\": \"$COMMENT\"}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.number }}/comments"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub 토큰을 환경 변수로 설정
 
   lint:
     runs-on: ubuntu-latest
     steps:
-      - name: job2 구현
-        run: echo "job2의 내용을 구현해주세요"
+      - uses: actions/checkout@v2  # 리포지토리의 코드를 체크아웃
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '14'  # Node.js 버전 14를 설정
+
+      - name: Install dependencies
+        run: npm install  # 프로젝트의 의존성을 설치
+
+      - name: Run ESLint
+        id: eslint
+        run: |
+          npm run lint > eslint-result.txt  # ESLint 명령어 실행 결과를 eslint-result.txt 파일에 저장
+          cat eslint-result.txt  # 파일 내용을 출력
+        continue-on-error: true  # 오류가 발생해도 다음 단계로 넘어감
+
+      - name: Format ESLint results and create a comment
+        if: failure()  # 이전 단계가 실패했을 때만 실행
+        run: |
+          LINT_OUTPUT=$(cat eslint-result.txt)  # eslint-result.txt 파일 내용을 변수에 저장
+          COMMENT="## ESLint Results\n\n\`\`\`\n$LINT_OUTPUT\n\`\`\`\n"  # ESLint 결과를 포맷팅하여 코멘트 생성
+          echo "$COMMENT" > eslint-comment.txt  # 코멘트를 eslint-comment.txt 파일에 저장
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post comment on PR
+        if: failure()  # 이전 단계가 실패했을 때만 실행
+        run: |
+          COMMENT=$(cat eslint-comment.txt)  # eslint-comment.txt 파일 내용을 변수에 저장
+          # GitHub API를 사용하여 PR에 코멘트를 남김
+          curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            -X POST \
+            -d "{\"body\": \"$COMMENT\"}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.number }}/comments"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
   test:
     runs-on: ubuntu-latest
     steps:
-      - name: job3 구현
-        run: echo "job3의 내용을 구현해주세요"
+      - uses: actions/checkout@v2  # 리포지토리의 코드를 체크아웃
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '14'  # Node.js 버전 14를 설정
+
+      - name: Install dependencies
+        run: npm install  # 프로젝트의 의존성을 설치
+
+      - name: Run tests and collect coverage
+        id: run-tests
+        run: |
+          npm run test:coverage > test-result.txt  # 테스트 및 커버리지 결과를 test-result.txt 파일에 저장
+          cat test-result.txt  # 파일 내용을 출력
+        continue-on-error: true  # 오류가 발생해도 다음 단계로 넘어감
+
+      - name: Generate coverage report
+        id: generate-coverage
+        run: |
+          # coverage/lcov-report/index.html 파일에서 커버리지 정보를 추출하여 변수에 저장
+          LINE_COVERAGE=$(grep -Po '(?<=Lines: <\/span>).*?(?=%)' coverage/lcov-report/index.html)
+          BRANCH_COVERAGE=$(grep -Po '(?<=Branches: <\/span>).*?(?=%)' coverage/lcov-report/index.html)
+          FUNCTION_COVERAGE=$(grep -Po '(?<=Functions: <\/span>).*?(?=%)' coverage/lcov-report/index.html)
+          STATEMENT_COVERAGE=$(grep -Po '(?<=Statements: <\/span>).*?(?=%)' coverage/lcov-report/index.html)
+          # 커버리지 결과를 포맷팅하여 코멘트 생성
+          COMMENT="## 테스트 성공 ✅\n\n### 커버리지 결과\n\n- 라인 커버리지: ${LINE_COVERAGE}%\n- 브랜치 커버리지: ${BRANCH_COVERAGE}%\n- 함수 커버리지: ${FUNCTION_COVERAGE}%\n- 구문 커버리지: ${STATEMENT_COVERAGE}%\n"
+          echo "$COMMENT" > coverage-comment.txt  # 코멘트를 coverage-comment.txt 파일에 저장
+
+      - name: Post coverage report on PR
+        if: always()  # 항상 실행
+        run: |
+          COMMENT=$(cat coverage-comment.txt)  # coverage-comment.txt 파일 내용을 변수에 저장
+          # GitHub API를 사용하여 PR에 코멘트를 남김
+          curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            -X POST \
+            -d "{\"body\": \"$COMMENT\"}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.number }}/comments"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
   lighthouse:
     runs-on: ubuntu-latest
     steps:
-      - name: job4 구현
-        run: echo "job4의 내용을 구현해주세요"
+      - uses: actions/checkout@v2  # 리포지토리의 코드를 체크아웃
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '14'  # Node.js 버전 14를 설정
+
+      - name: Install dependencies
+        run: npm install  # 프로젝트의 의존성을 설치
+
+      - name: Install Lighthouse CI
+        run: npm install -g @lhci/cli  # 글로벌로 Lighthouse CI를 설치
+
+      - name: Run Lighthouse CI
+        id: run-lighthouse
+        run: lhci autorun > lhci-result.txt  # Lighthouse CI를 실행하여 결과를 lhci-result.txt 파일에 저장
+        continue-on-error: true  # 오류가 발생해도 다음 단계로 넘어감
+
+      - name: Format Lighthouse results and create a comment
+        if: success()  # 이전 단계가 성공했을 때만 실행
+        run: |
+          # .lighthouseci/manifest.json 파일에서 Lighthouse 결과를 추출하여 변수에 저장
+          PERFORMANCE=$(grep -Po '(?<=performance": )\d+' .lighthouseci/manifest.json)
+          ACCESSIBILITY=$(grep -Po '(?<=accessibility": )\d+' .lighthouseci/manifest.json)
+          BEST_PRACTICES=$(grep -Po '(?<=best-practices": )\d+' .lighthouseci/manifest.json)
+          SEO=$(grep -Po '(?<=seo": )\d+' .lighthouseci/manifest.json)
+          # Lighthouse 결과를 포맷팅하여 코멘트 생성
+          COMMENT="## Lighthouse 성능 측정 결과\n\n| 카테고리 | 점수 |\n| --- | --- |\n| Performance | ${PERFORMANCE}% |\n| Accessibility | ${ACCESSIBILITY}% |\n| Best Practices | ${BEST_PRACTICES}% |\n| SEO | ${SEO}% |\n"
+          echo "$COMMENT" > lhci-comment.txt  # 코멘트를 lhci-comment.txt 파일에 저장
+
+      - name: Post Lighthouse report on PR
+        if: always()  # 항상 실행
+        run: |
+          COMMENT=$(cat lhci-comment.txt)  # lhci-comment.txt 파일 내용을 변수에 저장
+          # GitHub API를 사용하여 PR에 코멘트를 남김
+          curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            -X POST \
+            -d "{\"body\": \"$COMMENT\"}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.number }}/comments
 
   assign_reviewer:
     runs-on: ubuntu-latest
     steps:
-      - name: job5 구현
-        run: echo "job5의 내용을 구현해주세요"
+      - uses: actions/checkout@v2  # 리포지토리의 코드를 체크아웃
+
+      - name: Assign a random reviewer
+        run: |
+          # 팀원 중 랜덤으로 리뷰어를 선택
+          REVIEWER=$(shuf -n 1 -e alicelee1231 mosohyun)
+          echo "Assigned reviewer: $REVIEWER"
+          # 리뷰어를 멘션하여 코멘트를 생성
+          COMMENT="## :busts_in_silhouette: Reviewer assigned: @$REVIEWER\n\n@${REVIEWER} 님, 리뷰를 부탁드립니다."
+          echo "$COMMENT" > reviewer-comment.txt  # 코멘트를 reviewer-comment.txt 파일에 저장
+          # GitHub API를 사용하여 PR에 리뷰어를 할당하고 코멘트를 남김
+          curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            -X POST \
+            -d "{\"body\": \"@${REVIEWER} 님, 리뷰를 부탁드립니다.\"}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.number }}/comments"
+          echo "::set-output name=reviewer::$REVIEWER"  # 선택된 리뷰어를 출력 변수로 설정
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post comment on PR
+        run: |
+          COMMENT=$(cat reviewer-comment.txt)  # reviewer-comment.txt 파일 내용을 변수에 저장
+          # GitHub API를 사용하여 PR에 코멘트를 남김
+          curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            -X POST \
+            -d "{\"body\": \"$COMMENT\"}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.number }}/comments"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
